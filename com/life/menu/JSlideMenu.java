@@ -6,12 +6,7 @@ import java.awt.event.*;
 import javax.swing.*;
 import java.util.LinkedList;
 
-import javax.swing.plaf.ComponentUI;
-import javax.swing.plaf.InternalFrameUI;
 import javax.swing.plaf.basic.BasicInternalFrameUI;
-import javax.swing.plaf.metal.MetalInternalFrameTitlePane;
-import javax.swing.plaf.metal.MetalInternalFrameUI;
-import javax.swing.plaf.synth.SynthInternalFrameUI;
 
 public class JSlideMenu {
 
@@ -19,8 +14,8 @@ public class JSlideMenu {
 	private int minListWidth;
 	private boolean hideList;
 	private boolean showing;
-	// private boolean closeOnIconify;
-	private boolean closeOnOffMenuTouch;///////////////////////////////////////////////////////////////////////////////// TODO
+	private boolean closeOnIconify;
+	private boolean closeOnOffMenuTouch;
 
 	private JInternalFrame window;
 	private JScrollPane scroll;
@@ -29,12 +24,8 @@ public class JSlideMenu {
 	private JList<JSlideMenuItem> list;
 	private DefaultListModel<JSlideMenuItem> model;
 
-	private Timer listIncrementor;
-	private Timer listDecrementor;
-	private Timer itemIncrementor;
-	private Timer itemDecrementor;
-	private float listDelta;
-	private float itemDelta;
+	private ListController listController;
+	private ItemController itemController;
 
 	private Component comp;
 
@@ -46,13 +37,11 @@ public class JSlideMenu {
 		listCoveringPercent = 0.25f;
 		minListWidth = 100;
 		hideList = false;
+		closeOnIconify = true;
+		closeOnOffMenuTouch = true;
 
-		listDelta = 0f;
-		itemDelta = 1f;
-		listIncrementor = new Timer(10, new DeltaController(true, true));
-		listDecrementor = new Timer(10, new DeltaController(false, true));
-		itemIncrementor = new Timer(10, new DeltaController(true, false));
-		itemDecrementor = new Timer(10, new DeltaController(false, false));
+		listController = new ListController();
+		itemController = new ItemController();
 
 		model = new DefaultListModel<>();
 		list = new JList<JSlideMenuItem>(model);
@@ -62,18 +51,15 @@ public class JSlideMenu {
 			@Override
 			public Dimension getPreferredSize() {
 				if (hideList)
-					return new Dimension((int) ((double) comp.getWidth() * listDelta), comp.getHeight());
+					return new Dimension((int) (comp.getWidth() * listController.getDelta()), comp.getHeight());
 
 				return new Dimension( // Make sure it won't stick out of frame,
 										// if minListWidth > getWidth
-						Math.min(
-								(int) ((double) comp.getWidth() * listDelta), Math
-										.max((int) ((double) minListWidth * listDelta),
-												(int) ((double) (comp.getWidth()
-														/ (100 / (int) (listCoveringPercent * 100)) * listDelta)))),
+						Math.min((int) (comp.getWidth() * listController.getDelta()),
+								Math.max((int) (minListWidth * listController.getDelta()), (int) ((comp.getWidth()
+										/ (100 / (int) (listCoveringPercent * 100)) * listController.getDelta())))),
 						comp.getHeight());
 			}
-
 		};
 
 		scroll.setBorder(null);
@@ -93,21 +79,39 @@ public class JSlideMenu {
 			@Override
 			public Dimension getPreferredSize() {
 				if (hideList)
-					return new Dimension((int) ((double) comp.getWidth() * itemDelta), comp.getHeight());
+					return new Dimension((comp.getWidth() - (scroll.getPreferredSize().width)), comp.getHeight());
 
-				return new Dimension((int) ((double) (comp.getWidth() - (list.getWidth() * listDelta)) * itemDelta),
+				return new Dimension(
+						(int) ((comp.getWidth() - (scroll.getPreferredSize().width * listController.getDelta()))
+								* itemController.getDelta()),
 						comp.getHeight());
 
 			}
 
 		};
 
-		itemPanel.setOpaque(false);
+		itemPanel.setVisible(false);
 
-		itemPanel.addMouseListener(new MouseAdapter() {
+		JPanel shadow = new JPanel() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Dimension getPreferredSize() {
+				if(hideList)
+					return itemPanel.getPreferredSize();
+				
+				return new Dimension(
+						comp.getWidth() - (scroll.getPreferredSize().width  + itemPanel.getPreferredSize().width),
+						comp.getHeight());
+			}
+		};
+
+		shadow.setOpaque(false);
+
+		shadow.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mousePressed(MouseEvent evt) {
-				if (activeItem == null)
+				if (closeOnOffMenuTouch)
 					close();
 			}
 		});
@@ -116,6 +120,7 @@ public class JSlideMenu {
 		window.setLayout(new BorderLayout());
 		window.add(scroll, BorderLayout.WEST);
 		window.add(itemPanel, BorderLayout.CENTER);
+		window.add(shadow, BorderLayout.EAST);
 		((BasicInternalFrameUI) window.getUI()).setNorthPane(null);
 		window.setBorder(null);
 
@@ -123,7 +128,7 @@ public class JSlideMenu {
 
 		// shadow
 		window.setOpaque(false);
-		window.getContentPane().setBackground(new Color(0, 0, 0, 115));
+		window.getContentPane().setBackground(new Color(0, 0, 0, 0));
 
 		parentFrame.addComponentListener(new ComponentAdapter() {
 			@Override
@@ -131,17 +136,13 @@ public class JSlideMenu {
 				list.invalidate();
 				window.pack();
 			}
-
-			@Override
-			public void componentMoved(ComponentEvent e) {
-				window.setLocation(comp.getLocation());
-			}
 		});
 
 		parentFrame.addWindowListener(new WindowAdapter() {
 			@Override
 			public void windowIconified(WindowEvent e) {
-				close();
+				if (closeOnIconify)
+					close();
 			}
 		});
 
@@ -180,8 +181,7 @@ public class JSlideMenu {
 		window.setLocation(comp.getLocation());
 		window.setVisible(true);
 
-		listDecrementor.stop();
-		listIncrementor.start();
+		listController.increment();
 
 		for (SlideMenuListener l : listeners)
 			l.menuOpened(this);
@@ -196,8 +196,7 @@ public class JSlideMenu {
 			closeItem();
 
 		list.getSelectionModel().clearSelection();
-		listIncrementor.stop();
-		listDecrementor.start();
+		listController.decrement();
 
 		for (SlideMenuListener l : listeners)
 			l.menuClosed(this);
@@ -209,22 +208,18 @@ public class JSlideMenu {
 
 	public void openItem(JSlideMenuItem item) {
 		if (hideList) {
-			listIncrementor.stop();
-			listDecrementor.start();
+			listController.decrement();
 		}
 
+		itemPanel.setVisible(true);
 		itemPanel.removeAll();
 		item.setup(itemPanel);
 
 		boolean hasActiveItem = activeItem != null;
 		activeItem = item;
 
-		itemPanel.setOpaque(true);
-
 		if (!hasActiveItem) {
-			itemDelta = 0f;
-			itemDecrementor.stop();
-			itemIncrementor.start();
+			itemController.increment();
 		}
 		window.pack();
 
@@ -235,11 +230,10 @@ public class JSlideMenu {
 	public void closeItem() {
 		JSlideMenuItem i = activeItem;
 		activeItem = null;
-		itemIncrementor.stop();
-		itemDecrementor.start();
+		itemController.decrement();
+
 		if (hideList) {
-			listDecrementor.stop();
-			listIncrementor.start();
+			listController.increment();
 		}
 		list.getSelectionModel().clearSelection();
 		window.pack();
@@ -271,6 +265,22 @@ public class JSlideMenu {
 
 	public boolean getHideList() {
 		return hideList;
+	}
+
+	public boolean getCloseOnIconify() {
+		return closeOnIconify;
+	}
+
+	public void setCloseOnIconify(boolean bool) {
+		closeOnIconify = bool;
+	}
+
+	public boolean getCloseOnOffMenuTouch() {
+		return closeOnOffMenuTouch;
+	}
+
+	public void setCloseOnOffMenuTouch(boolean bool) {
+		closeOnOffMenuTouch = bool;
 	}
 
 	public JSlideMenuItem activeItem() {
@@ -311,64 +321,53 @@ public class JSlideMenu {
 		return showing;
 	}
 
-	private class DeltaController implements ActionListener {
+	private class ListController extends DeltaController {
 
-		final static float deltaStep = .1f;
-		final static int size = 20;
-		boolean increment;
-		boolean listController;
-
-		DeltaController(boolean increment, boolean list) {
-			this.increment = increment;
-			listController = list;
+		ListController() {
+			super(0.05f);
 		}
 
 		@Override
-		public void actionPerformed(ActionEvent evt) {
+		public void step() {
+			if (getDelta() < .2f || getDelta() > .8f)
+				setTimerDelay(25);
+			else
+				setTimerDelay(10);
 
-			if (increment) {
-				if (listController) {
-					if (listDelta + deltaStep >= 1f) {
-						listDelta = 1f;
-						((Timer) evt.getSource()).stop();
-					} else {
-						listDelta += deltaStep;
-					}
-				} else {
-					if (itemDelta + deltaStep >= 1f) {
-						itemDelta = 1f;
-						((Timer) evt.getSource()).stop();
-					} else {
-						itemDelta += deltaStep;
-					}
-				}
-
-			} else {
-				if (listController) {
-					if (listDelta - deltaStep <= 0f) {
-						listDelta = 0f;
-						((Timer) evt.getSource()).stop();
-						if (!isShowing())
-							window.setVisible(false);
-					} else {
-						listDelta -= deltaStep;
-					}
-				} else {
-					if (itemDelta - deltaStep <= 0f) {
-						itemDelta = 1f;
-						((Timer) evt.getSource()).stop();
-						itemPanel.removeAll();
-						itemPanel.setOpaque(false);
-					} else {
-						itemDelta -= deltaStep;
-					}
-				}
-			}
-
+			window.getContentPane().setBackground(new Color(0, 0, 0, (int)(115 * getDelta())));
 			list.invalidate();
 			window.pack();
 		}
 
+		@Override
+		public void decrementComplete() {
+			if (!isShowing())
+				window.setVisible(false);
+		}
+	}
+
+	private class ItemController extends DeltaController {
+
+		ItemController() {
+			super(0.05f);
+		}
+
+		@Override
+		public void step() {
+			if (getDelta() < .2f || getDelta() > .8f)
+				setTimerDelay(25);
+			else
+				setTimerDelay(10);
+
+			itemPanel.invalidate();
+			window.pack();
+		}
+
+		@Override
+		public void decrementComplete() {
+			itemPanel.removeAll();
+			itemPanel.setVisible(false);
+		}
 	}
 
 }
