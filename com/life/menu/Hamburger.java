@@ -80,7 +80,7 @@ public class Hamburger {
 		return icn;
 	}
 
-	public static JComponent barFor(JSlideMenu menu) {
+	public static JComponent barFor(JSlideMenu menu, boolean flip) {
 		JPanel hamburgerBar;
 		JButton hamburgerButton;
 		JLabel title;
@@ -88,10 +88,10 @@ public class Hamburger {
 		title = new JLabel("", JLabel.CENTER);
 		hamburgerBar = new JPanel();
 		hamburgerButton = new JButton();
+		
+		HamburgerController controller = new HamburgerController(hamburgerButton, flip);
 
-		Timer incrementor = new Timer(20, new DeltaController(hamburgerButton, true));
-		Timer decrementor = new Timer(20, new DeltaController(hamburgerButton, false));
-		hamburgerButton.setIcon(icon(20, 20, 0f, true));
+		hamburgerButton.setIcon(icon(20, 20, 0f, flip));
 
 		hamburgerButton.addActionListener(evt -> {
 			if (menu.isShowing()) {
@@ -112,14 +112,12 @@ public class Hamburger {
 
 			@Override
 			public void menuOpened(JSlideMenu menu) {
-				decrementor.stop();
-				incrementor.start();
+				controller.increment();
 			}
 
 			@Override
 			public void menuClosed(JSlideMenu menu) {
-				incrementor.stop();
-				decrementor.start();
+				controller.decrement();
 			}
 
 			@Override
@@ -183,39 +181,26 @@ public class Hamburger {
 		}
 	}
 
-	private static class DeltaController implements ActionListener {
+	private static class HamburgerController extends DeltaController {
 
-		static float delta = 0;
-		final static float deltaStep = .1f;
 		final static int size = 20;
-		boolean increment;
+		boolean flip;
 		JButton button;
 
-		DeltaController(JButton b, boolean increment) {
+		HamburgerController(JButton b, boolean flip) {
+			super(0.05f, 35);
 			button = b;
-			this.increment = increment;
+			this.flip = flip;
 		}
 
 		@Override
-		public void actionPerformed(ActionEvent evt) {
-			if (increment) {
-				if (delta + deltaStep >= 1f) {
-					delta = 1f;
-					((Timer) evt.getSource()).stop();
-				} else {
-					delta += deltaStep;
-				}
-
-			} else {
-				if (delta - deltaStep <= 0f) {
-					delta = 0f;
-					((Timer) evt.getSource()).stop();
-				} else {
-					delta -= deltaStep;
-				}
-			}
-
-			button.setIcon(icon(size, size, delta, true));
+		public void step() {
+			if(getDelta() < .2f || getDelta() >.8f)
+				setTimerDelay(35);
+			else
+				setTimerDelay(10);
+			
+			button.setIcon(icon(size, size, getDelta(), flip));
 		}
 
 	}
